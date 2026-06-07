@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>Hand Box Puzzle</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+        body{background:#0a0a0a;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;overflow:hidden;touch-action:none;height:100vh;width:100vw}
+        .loading-screen{position:fixed;top:0;left:0;width:100%;height:100%;background:#0a0a0a;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;transition:opacity .5s}
+        .loading-screen.hidden{opacity:0;pointer-events:none}
+        .spinner{width:50px;height:50px;border:4px solid #333;border-top-color:#00d4ff;border-radius:50%;animation:spin 1s linear infinite}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        .loading-text{margin-top:20px;color:#888;font-size:14px}
+        .start-btn{margin-top:30px;padding:15px 40px;font-size:16px;background:#00d4ff;color:#000;border:none;border-radius:25px;cursor:pointer;font-weight:bold;display:none}
+        .start-btn:active{transform:scale(.95)}
+        .app-container{display:none;flex-direction:column;height:100vh}
+        .app-container.active{display:flex}
+        .camera-section{position:relative;width:100%;height:50vh;background:#111;overflow:hidden}
+        .video-container{position:relative;width:100%;height:100%}
+        #videoElement{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+        #canvasOverlay{position:absolute;top:0;left:0;width:100%;height:100%;transform:scaleX(-1);pointer-events:none}
+        .status-bar{position:absolute;top:10px;left:50%;transform:translateX(-50%);padding:8px 16px;border-radius:20px;font-size:12px;font-weight:bold;z-index:10;transition:all .3s;white-space:nowrap}
+        .status-bar.no-hand{background:rgba(255,0,0,.7)}
+        .status-bar.detected{background:rgba(0,255,136,.7);color:#000}
+        .status-bar.pinch{background:rgba(255,136,0,.8);color:#000;animation:pulse .3s}
+        @keyframes pulse{0%,100%{transform:translateX(-50%) scale(1)}50%{transform:translateX(-50%) scale(1.1)}}
+        .box-counter{position:absolute;top:10px;right:10px;background:rgba(0,0,0,.7);padding:8px 12px;border-radius:15px;font-size:14px;z-index:10}
+        .box-counter span{color:#00ff88;font-weight:bold}
+        .controls-section{flex:1;display:flex;flex-direction:column;padding:15px;gap:10px;overflow-y:auto;background:#1a1a1a}
+        .btn-row{display:flex;gap:10px;justify-content:center}
+        .btn{flex:1;padding:12px;border:none;border-radius:12px;font-size:14px;font-weight:bold;cursor:pointer;color:#fff;transition:transform .1s;max-width:150px}
+        .btn:active{transform:scale(.95)}
+        .btn-screenshot{background:#ff8800}
+        .btn-puzzle{background:#00d4ff;color:#000}
+        .btn-clear{background:#ff4444}
+        .btn-camera{background:#00ff88;color:#000}
+        .btn-shuffle{background:#ff00ff}
+        .instructions{background:#222;padding:12px;border-radius:10px;font-size:13px;line-height:1.6}
+        .instructions h3{color:#00d4ff;margin-bottom:8px;font-size:15px}
+        .instructions ol{padding-left:18px}
+        .instructions li{color:#ccc;margin-bottom:4px}
+        .screenshot-strip{display:flex;gap:8px;overflow-x:auto;padding:8px;background:#222;border-radius:10px;min-height:80px;align-items:center}
+        .screenshot-thumb{width:80px;height:60px;border-radius:6px;cursor:pointer;border:2px solid transparent;flex-shrink:0;object-fit:cover}
+        .screenshot-thumb.selected{border-color:#00ff88}
+        .empty-text{color:#666;font-size:12px;text-align:center;width:100%}
+        .puzzle-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:#0a0a0a;z-index:100;flex-direction:column;padding:10px}
+        .puzzle-overlay.active{display:flex}
+        .puzzle-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding:5px}
+        .puzzle-title{font-size:20px;color:#00d4ff;font-weight:bold}
+        .puzzle-area{position:relative;width:100%;aspect-ratio:4/3;background:#1a1a1a;border:2px solid #333;border-radius:10px;overflow:hidden}
+        .puzzle-grid{position:absolute;top:0;left:0;width:100%;height:100%;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr)}
+        .grid-cell{border:1px dashed #444}
+        .puzzle-piece{position:absolute;cursor:grab;border:2px solid #fff;border-radius:4px;touch-action:none;user-select:none;-webkit-user-select:none}
+        .puzzle-piece.dragging{cursor:grabbing;z-index:1000;box-shadow:0 5px 20px rgba(0,0,0,.5)}
+        .puzzle-piece.locked{border-color:#00ff88;box-shadow:0 0 10px rgba(0,255,136,.3)}
+        .progress-container{margin:10px 0}
+        .progress-bar{width:100%;height:25px;background:#222;border-radius:12px;overflow:hidden}
+        .progress-fill{height:100%;background:#00ff88;transition:width .3s ease;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;color:#000}
+        .congrats-msg{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-size:28px;color:#00ff88;text-shadow:0 0 20px rgba(0,255,136,.8);display:none;z-index:200;text-align:center;animation:popIn .5s ease}
+        @keyframes popIn{0%{transform:translate(-50%,-50%) scale(0)}50%{transform:translate(-50%,-50%) scale(1.2)}100%{transform:translate(-50%,-50%) scale(1)}}
+        .tip-text{text-align:center;color:#888;font-size:12px;margin-top:5px}
+        @media(min-width:768px){.camera-section{height:60vh}.btn{padding:15px;font-size:16px}}
+    </style>
+</head>
+<body>
+    <div class="loading-screen" id="loadingScreen">
+        <div class="spinner"></div>
+        <div class="loading-text">Memuat Hand Tracking...</div>
+        <button class="start-btn" id="startBtn">Mulai Kamera</button>
+    </div>
+    <div class="app-container" id="mainApp">
+        <div class="camera-section">
+            <div class="video-container">
+                <video id="videoElement" autoplay playsinline muted></video>
+                <canvas id="canvasOverlay"></canvas>
+                <div class="status-bar no-hand" id="statusBar">Tangan Tidak Terdeteksi</div>
+                <div class="box-counter">Kotak: <span id="boxCount">0</span></div>
+            </div>
+        </div>
+        <div class="controls-section">
+            <div class="btn-row">
+                <button class="btn btn-screenshot" onclick="takeScreenshot()">Screenshot</button>
+                <button class="btn btn-puzzle" onclick="openPuzzle()">Puzzle</button>
+                <button class="btn btn-clear" onclick="clearBoxes()">Clear</button>
+            </div>
+            <div class="instructions">
+                <h3>Cara Pakai</h3>
+                <ol>
+                    <li>Tunjukkan tangan ke kamera</li>
+                    <li><strong>Cubit</strong> (jempol+telunjuk) = kotak baru</li>
+                    <li>Screenshot lalu main puzzle!</li>
+                </ol>
+            </div>
+            <div class="screenshot-strip" id="screenshotStrip">
+                <div class="empty-text">Screenshot muncul di sini</div>
+            </div>
+        </div>
+    </div>
+    <div class="puzzle-overlay" id="puzzleOverlay">
+        <div class="puzzle-header">
+            <div class="puzzle-title">Puzzle</div>
+            <div class="btn-row" style="flex:0">
+                <button class="btn btn-camera" onclick="closePuzzle()" style="max-width:100px">Kamera</button>
+                <button class="btn btn-shuffle" onclick="shufflePuzzle()" style="max-width:100px">Acak</button>
+            </div>
+        </div>
+        <div class="progress-container">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill" style="width:0%">0%</div>
+            </div>
+        </div>
+        <div class="puzzle-area" id="puzzleArea">
+            <div class="puzzle-grid" id="puzzleGrid"></div>
+        </div>
+        <div class="tip-text">Sentuh & geser piece puzzle - Dekatkan ke grid untuk lock</div>
+    </div>
+    <div class="congrats-msg" id="congratsMsg">Puzzle Selesai!<br><span style="font-size:16px">🎉</span></div>
+    <script>
+        const video=document.getElementById('videoElement'),canvas=document.getElementById('canvasOverlay'),ctx=canvas.getContext('2d'),loadingScreen=document.getElementById('loadingScreen'),startBtn=document.getElementById('startBtn'),mainApp=document.getElementById('mainApp'),statusBar=document.getElementById('statusBar'),boxCountEl=document.getElementById('boxCount');
+        let boxes=[],screenshots=[],lastPinchTime=0,PINCH_COOLDOWN=400,PINCH_THRESHOLD=.07,puzzlePieces=[],selectedPiece=null,dragOffset={x:0,y:0},puzzleCompleted=false,COLORS=['#00ff88','#ff4444','#00d4ff','#ff00ff','#ff8800','#00ffff','#ffff00','#ff0088'];
+        const hands=new Hands({locateFile:file=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+        hands.setOptions({maxNumHands:1,modelComplexity:1,minDetectionConfidence:.7,minTrackingConfidence:.5});
+        hands.onResults(onResults);
+        let camera=null;
+        function startCamera(){camera=new Camera(video,{onFrame:async()=>{await hands.send({image:video})},width:640,height:480});camera.start().then(()=>{loadingScreen.classList.add('hidden');mainApp.classList.add('active')}).catch(err=>{alert('Error kamera: '+err.message)})}
+        window.onload=()=>{startBtn.style.display='block';startBtn.addEventListener('click',startCamera)};
+        function onResults(results){canvas.width=video.videoWidth||640;canvas.height=video.videoHeight||480;ctx.clearRect(0,0,canvas.width,canvas.height);let handDetected=false,pinchDetected=false,pinchDist=1;if(results.multiHandLandmarks&&results.multiHandLandmarks.length>0){handDetected=true;for(const landmarks of results.multiHandLandmarks){drawConnectors(ctx,landmarks,HAND_CONNECTIONS,{color:'#00d4ff',lineWidth:2});drawLandmarks(ctx,landmarks,{color:'#ff8800',lineWidth:1,radius:3});const thumbTip=landmarks[4],indexTip=landmarks[8],distance=Math.sqrt(Math.pow(thumbTip.x-indexTip.x,2)+Math.pow(thumbTip.y-indexTip.y,2));pinchDist=distance;if(distance<PINCH_THRESHOLD){pinchDetected=true;const now=Date.now();if(now-lastPinchTime>PINCH_COOLDOWN){lastPinchTime=now;const px=(thumbTip.x+indexTip.x)/2*canvas.width,py=(thumbTip.y+indexTip.y)/2*canvas.height;createBox(px,py)}const cx=(thumbTip.x+indexTip.x)/2*canvas.width,cy=(thumbTip.y+indexTip.y)/2*canvas.height;ctx.beginPath();ctx.arc(cx,cy,25,0,2*Math.PI);ctx.fillStyle='rgba(255,136,0,0.6)';ctx.fill();ctx.strokeStyle='#ff8800';ctx.lineWidth=3;ctx.stroke()}}}
+        boxes.forEach((box,i)=>{ctx.strokeStyle=box.color;ctx.lineWidth=3;ctx.strokeRect(box.x-box.size/2,box.y-box.size/2,box.size,box.size);ctx.fillStyle=box.color+'30';ctx.fillRect(box.x-box.size/2,box.y-box.size/2,box.size,box.size);ctx.fillStyle=box.color;ctx.font='bold 12px Arial';ctx.fillText(`${i+1}`,box.x-box.size/2+4,box.y-box.size/2+14)});
+        updateStatus(handDetected,pinchDetected,pinchDist);boxCountEl.textContent=boxes.length}
+        function createBox(x,y){const color=COLORS[Math.floor(Math.random()*COLORS.length)],size=Math.floor(Math.random()*50)+50;boxes.push({x,y,size,color})}
+        function updateStatus(handDetected,pinchDetected,pinchDist){if(pinchDetected){statusBar.className='status-bar pinch';statusBar.textContent='PINCH!'}else if(handDetected){statusBar.className='status-bar detected';statusBar.textContent=`Tangan OK (${pinchDist.toFixed(2)})`}else{statusBar.className='status-bar no-hand';statusBar.textContent='Tangan?'}}
+        function takeScreenshot(){if(boxes.length===0){alert('Buat kotak dulu! Cubit tangan Anda.');return}const ssCanvas=document.createElement('canvas');ssCanvas.width=canvas.width;ssCanvas.height=canvas.height;const sctx=ssCanvas.getContext('2d');sctx.drawImage(video,0,0,ssCanvas.width,ssCanvas.height);boxes.forEach(box=>{sctx.strokeStyle=box.color;sctx.lineWidth=3;sctx.strokeRect(box.x-box.size/2,box.y-box.size/2,box.size,box.size)});const dataUrl=ssCanvas.toDataURL('image/png');screenshots.push(dataUrl);updateScreenshotStrip();const link=document.createElement('a');link.download=`handbox_${Date.now()}.png`;link.href=dataUrl;link.click()}
+        function updateScreenshotStrip(){const strip=document.getElementById('screenshotStrip');if(screenshots.length===0){strip.innerHTML='<div class="empty-text">Screenshot muncul di sini</div>';return}strip.innerHTML='';screenshots.forEach((src,i)=>{const img=document.createElement('img');img.src=src;img.className='screenshot-thumb';img.onclick=()=>selectScreenshot(i);strip.appendChild(img)})}
+        function selectScreenshot(index){document.querySelectorAll('.screenshot-thumb').forEach((t,i)=>t.classList.toggle('selected',i===index))}
+        function clearBoxes(){boxes=[];boxCountEl.textContent='0'}
+        function openPuzzle(){if(screenshots.length===0){alert('Screenshot dulu!');return}document.getElementById('puzzleOverlay').classList.add('active');createPuzzle(screenshots[screenshots.length-1])}
+        function closePuzzle(){document.getElementById('puzzleOverlay').classList.remove('active');document.getElementById('congratsMsg').style.display='none'}
+        function createPuzzle(imageSrc){const puzzleArea=document.getElementById('puzzleArea'),puzzleGrid=document.getElementById('puzzleGrid');puzzleArea.querySelectorAll('.puzzle-piece').forEach(p=>p.remove());puzzleGrid.innerHTML='';puzzlePieces=[];puzzleCompleted=false;for(let i=0;i<<9;i++){const cell=document.createElement('div');cell.className='grid-cell';puzzleGrid.appendChild(cell)}const img=new Image();img.onload=()=>{const areaW=puzzleArea.offsetWidth,areaH=puzzleArea.offsetHeight,pieceW=areaW/3,pieceH=areaH/3;for(let row=0;row<<3;row++){for(let col=0;col<<3;col++){const pCanvas=document.createElement('canvas');pCanvas.width=pieceW;pCanvas.height=pieceH;const pctx=pCanvas.getContext('2d');pctx.drawImage(img,col*pieceW*(img.width/areaW),row*pieceH*(img.height/areaH),pieceW*(img.width/areaW),pieceH*(img.height/areaH),0,0,pieceW,pieceH);const piece=document.createElement('div');piece.className='puzzle-piece';piece.style.width=pieceW+'px';piece.style.height=pieceH+'px';piece.style.backgroundImage=`url(${pCanvas.toDataURL()})`;piece.style.backgroundSize='cover';const randX=Math.random()*(areaW-pieceW),randY=Math.random()*(areaH-pieceH);piece.style.left=randX+'px';piece.style.top=randY+'px';piece.dataset.correctX=col*pieceW;piece.dataset.correctY=row*pieceH;piece.dataset.locked='false';piece.addEventListener('touchstart',handleStart,{passive:false});piece.addEventListener('mousedown',handleStart);puzzleArea.appendChild(piece);puzzlePieces.push(piece)}}updateProgress()};img.src=imageSrc}
+        function handleStart(e){e.preventDefault();const piece=e.target;if(piece.dataset.locked==='true')return;selectedPiece=piece;piece.classList.add('dragging');const clientX=e.touches?e.touches[0].clientX:e.clientX,clientY=e.touches?e.touches[0].clientY:e.clientY;const rect=piece.getBoundingClientRect();dragOffset.x=clientX-rect.left;dragOffset.y=clientY-rect.top;document.addEventListener('mousemove',handleMove);document.addEventListener('mouseup',handleEnd);document.addEventListener('touchmove',handleMove,{passive:false});document.addEventListener('touchend',handleEnd)}
+        function handleMove(e){if(!selectedPiece)return;e.preventDefault();const clientX=e.touches?e.touches[0].clientX:e.clientX,clientY=e.touches?e.touches[0].clientY:e.clientY;const parentRect=selectedPiece.parentElement.getBoundingClientRect(),areaW=parentRect.width,areaH=parentRect.height;let newX=clientX-parentRect.left-dragOffset.x,newY=clientY-parentRect.top-dragOffset.y;newX=Math.max(0,Math.min(newX,areaW-selectedPiece.offsetWidth));newY=Math.max(0,Math.min(newY,areaH-selectedPiece.offsetHeight));selectedPiece.style.left=newX+'px';selectedPiece.style.top=newY+'px'}
+        function handleEnd(e){if(!selectedPiece)return;selectedPiece.classList.remove('dragging');const correctX=parseFloat(selectedPiece.dataset.correctX),correctY=parseFloat(selectedPiece.dataset.correctY),currentX=parseFloat(selectedPiece.style.left),currentY=parseFloat(selectedPiece.style.top);const dist=Math.sqrt(Math.pow(currentX-correctX,2)+Math.pow(currentY-correctY,2));if(dist<<30){selectedPiece.style.left=correctX+'px';selectedPiece.style.top=correctY+'px';selectedPiece.dataset.locked='true';selectedPiece.classList.add('locked')}selectedPiece=null;document.removeEventListener('mousemove',handleMove);document.removeEventListener('mouseup',handleEnd);document.removeEventListener('touchmove',handleMove);document.removeEventListener('touchend',handleEnd);updateProgress();checkComplete()}
+        function updateProgress(){const locked=puzzlePieces.filter(p=>p.dataset.locked==='true').length,total=puzzlePieces.length,percent=total>0?Math.round((locked/total)*100):0;const fill=document.getElementById('progressFill');fill.style.width=percent+'%';fill.textContent=percent+'%'}
+        function checkComplete(){const allLocked=puzzlePieces.every(p=>p.dataset.locked==='true');if(allLocked&&puzzlePieces.length>0&&!puzzleCompleted){puzzleCompleted=true;document.getElementById('congratsMsg').style.display='block';setTimeout(()=>{document.getElementById('congratsMsg').style.display='none'},3000)}}
+        function shufflePuzzle(){const areaW=document.getElementById('puzzleArea').offsetWidth,areaH=document.getElementById('puzzleArea').offsetHeight;puzzlePieces.forEach(piece=>{if(piece.dataset.locked!=='true'){piece.style.left=Math.random()*(areaW-piece.offsetWidth)+'px';piece.style.top=Math.random()*(areaH-piece.offsetHeight)+'px'}})}
+    </script>
+</body>
+</html>
